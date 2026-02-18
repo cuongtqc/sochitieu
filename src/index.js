@@ -74,7 +74,7 @@ const EXTRACTION_SCHEMA = {
   required: ['amount', 'purpose', 'category', 'time', 'source', 'raw_message'],
 };
 
-async function extractExpenseWithGemini(rawMessage) {
+async function extractExpenseWithGemini(rawMessage, retryCount = 0, maxRetries = 3) {
   const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent?key=${GEMINI_API_KEY}`;
 
   const instruction = [
@@ -85,47 +85,61 @@ async function extractExpenseWithGemini(rawMessage) {
     'source nếu không rõ thì ghi "chưa rõ".',
   ].join(' ');
 
-  const response = await fetch(endpoint, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      system_instruction: {
-        parts: [{ text: instruction }],
-      },
-      contents: [
-        {
-          role: 'user',
-          parts: [{ text: rawMessage }],
-        },
-      ],
-      generationConfig: {
-        responseMimeType: 'application/json',
-        responseSchema: EXTRACTION_SCHEMA,
-        temperature: 0.2,
-      },
-    }),
-  });
-
-  if (!response.ok) {
-    const errorText = await response.text();
-    throw new Error(`Gemini API lỗi (${response.status}): ${errorText}`);
-  }
-
-  const data = await response.json();
-  const text = data?.candidates?.[0]?.content?.parts?.[0]?.text;
-
-  if (!text) {
-    throw new Error('Gemini không trả về dữ liệu hợp lệ.');
-  }
-
-  let parsed;
   try {
-    parsed = JSON.parse(text);
-  } catch {
-    throw new Error(`Không parse được JSON từ Gemini: ${text}`);
-  }
+    const response = await fetch(endpoint, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        system_instruction: {
+          parts: [{ text: instruction }],
+        },
+        contents: [
+          {
+            role: 'user',
+            parts: [{ text: rawMessage }],
+          },
+        ],
+        generationConfig: {
+          responseMimeType: 'application/json',
+          responseSchema: EXTRACTION_SCHEMA,
+          temperature: 0.2,
+        },
+      }),
+    });
 
-  return parsed;
+    if (!response.ok) {
+      const errorText = await response.text();
+
+      // Retry khi gặp 429 (Too Many Requests)
+      if (response.status === 429 && retryCount < maxRetries) {
+        const delayMs = Math.pow(2, retryCount) * 1000; // Exponential backoff: 1s, 2s, 4s
+        console.warn(`Gemini API 429 - retry ${retryCount + 1}/${maxRetries} sau ${delayMs}ms`);
+        await new Promise(resolve => setTimeout(resolve, delayMs));
+        return extractExpenseWithGemini(rawMessage, retryCount + 1, maxRetries);
+      }
+
+      throw new Error(`Gemini API lỗi (${response.status}): ${errorText}`);
+    }
+
+    const data = await response.json();
+    const text = data?.candidates?.[0]?.content?.parts?.[0]?.text;
+
+    if (!text) {
+      throw new Error('Gemini không trả về dữ liệu hợp lệ.');
+    }
+
+    let parsed;
+    try {
+      parsed = JSON.parse(text);
+    } catch {
+      throw new Error(`Không parse được JSON từ Gemini: ${text}`);
+    }
+
+    return parsed;
+  } catch (error) {
+    // Không retry lại nếu đã vượt quá số lần retry
+    throw error;
+  }
 }
 
 async function appendToSheet({ telegramUserId, telegramUsername, chatId, extracted }) {
