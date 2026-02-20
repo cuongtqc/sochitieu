@@ -8,8 +8,9 @@ const {
   PORT = 3000,
   TELEGRAM_BOT_TOKEN,
   TELEGRAM_WEBHOOK_SECRET,
+  GROQ_API_KEY: GROQ_API_KEY_ENV,
   GEMINI_API_KEY,
-  GEMINI_MODEL = 'gemini-2.5-flash',
+  GROQ_MODEL = 'llama-3.1-8b-instant',
   GOOGLE_SPREADSHEET_ID,
   GOOGLE_SHEET_NAME = 'Sheet1',
   GOOGLE_SERVICE_ACCOUNT_EMAIL,
@@ -17,15 +18,19 @@ const {
   DEFAULT_TIMEZONE = 'Asia/Ho_Chi_Minh',
 } = process.env;
 
+const GROQ_API_KEY = GROQ_API_KEY_ENV ?? GEMINI_API_KEY;
+
 const requiredEnv = [
   'TELEGRAM_BOT_TOKEN',
-  'GEMINI_API_KEY',
   'GOOGLE_SPREADSHEET_ID',
   'GOOGLE_SERVICE_ACCOUNT_EMAIL',
   'GOOGLE_PRIVATE_KEY',
 ];
 
 const missing = requiredEnv.filter((k) => !process.env[k]);
+if (!GROQ_API_KEY) {
+  missing.push('GROQ_API_KEY');
+}
 if (missing.length > 0) {
   throw new Error(`Thiếu biến môi trường: ${missing.join(', ')}`);
 }
@@ -74,9 +79,7 @@ const EXTRACTION_SCHEMA = {
   required: ['amount', 'purpose', 'category', 'time', 'source', 'raw_message'],
 };
 
-async function extractExpenseWithGemini(rawMessage, retryCount = 0, maxRetries = 3) {
-  const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent?key=${GEMINI_API_KEY}`;
-
+async function extractExpenseWithGroq(rawMessage, retryCount = 0, maxRetries = 3) {
   const instruction = [
     'Bạn là hệ thống trích xuất dữ liệu chi tiêu/thu nhập tiếng Việt.',
     'Trả về JSON đúng schema.',
@@ -86,24 +89,23 @@ async function extractExpenseWithGemini(rawMessage, retryCount = 0, maxRetries =
   ].join(' ');
 
   try {
-    const response = await fetch(endpoint, {
+    const response = await fetch('https://api.groq.com/openai/v1/chat/completions', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: {
+        'Authorization': `Bearer ${GROQ_API_KEY}`,
+        'Content-Type': 'application/json',
+      },
       body: JSON.stringify({
-        system_instruction: {
-          parts: [{ text: instruction }],
-        },
-        contents: [
+        model: GROQ_MODEL,
+        response_format: { type: 'json_object' },
+        temperature: 0.2,
+        messages: [
+          { role: 'system', content: instruction },
           {
             role: 'user',
-            parts: [{ text: rawMessage }],
+            content: `Schema cần trả về: ${JSON.stringify(EXTRACTION_SCHEMA)}\nTin nhắn người dùng: ${rawMessage}`,
           },
         ],
-        generationConfig: {
-          responseMimeType: 'application/json',
-          responseSchema: EXTRACTION_SCHEMA,
-          temperature: 0.2,
-        },
       }),
     });
 
@@ -113,26 +115,26 @@ async function extractExpenseWithGemini(rawMessage, retryCount = 0, maxRetries =
       // Retry khi gặp 429 (Too Many Requests)
       if (response.status === 429 && retryCount < maxRetries) {
         const delayMs = Math.pow(2, retryCount) * 1000; // Exponential backoff: 1s, 2s, 4s
-        console.warn(`Gemini API 429 - retry ${retryCount + 1}/${maxRetries} sau ${delayMs}ms`);
+        console.warn(`Groq API 429 - retry ${retryCount + 1}/${maxRetries} sau ${delayMs}ms`);
         await new Promise(resolve => setTimeout(resolve, delayMs));
-        return extractExpenseWithGemini(rawMessage, retryCount + 1, maxRetries);
+        return extractExpenseWithGroq(rawMessage, retryCount + 1, maxRetries);
       }
 
-      throw new Error(`Gemini API lỗi (${response.status}): ${errorText}`);
+      throw new Error(`Groq API lỗi (${response.status}): ${errorText}`);
     }
 
     const data = await response.json();
-    const text = data?.candidates?.[0]?.content?.parts?.[0]?.text;
+    const text = data?.choices?.[0]?.message?.content;
 
     if (!text) {
-      throw new Error('Gemini không trả về dữ liệu hợp lệ.');
+      throw new Error('Groq không trả về dữ liệu hợp lệ.');
     }
 
     let parsed;
     try {
       parsed = JSON.parse(text);
     } catch {
-      throw new Error(`Không parse được JSON từ Gemini: ${text}`);
+      throw new Error(`Không parse được JSON từ Groq: ${text}`);
     }
 
     return parsed;
@@ -209,7 +211,7 @@ app.post('/telegram/webhook', async (req, res) => {
     const telegramUserId = message.from?.id;
     const telegramUsername = message.from?.username;
 
-    const extracted = await extractExpenseWithGemini(text);
+    const extracted = await extractExpenseWithGroq(text);
 
     extracted.raw_message = text;
 

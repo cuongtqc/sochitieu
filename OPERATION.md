@@ -1,7 +1,7 @@
-Runbook triển khai trên Render (Telegram → Webhook → Gemini → Google Sheets)
+Runbook triển khai trên Render (Telegram → Webhook → Groq → Google Sheets)
 0) Bạn đã có sẵn gì trong code
 App đang dùng Express, có POST /telegram/webhook để nhận update từ Telegram và GET /health để healthcheck.
-App cần các biến môi trường Telegram/Gemini/Sheets được khai báo sẵn trong .env.example.
+App cần các biến môi trường Telegram/Groq/Sheets được khai báo sẵn trong .env.example.
 README đã mô tả cách set webhook Telegram và yêu cầu HTTPS public (Render đáp ứng).
 1) Chuẩn bị Google Sheets
 Tạo Google Sheet (ví dụ: so_chi_tieu).
@@ -23,8 +23,8 @@ Thêm Environment Variables (copy từ .env.example):
 PORT=3000
 TELEGRAM_BOT_TOKEN=...
 TELEGRAM_WEBHOOK_SECRET=...
-GEMINI_API_KEY=...
-GEMINI_MODEL=gemini-2.0-flash
+GROQ_API_KEY=...
+GROQ_MODEL=llama-3.1-8b-instant
 GOOGLE_SPREADSHEET_ID=...
 GOOGLE_SHEET_NAME=Sheet1
 GOOGLE_SERVICE_ACCOUNT_EMAIL=...
@@ -50,7 +50,7 @@ Nếu lỗi:
 Bot sẽ trả tin nhắn fallback báo nhập rõ hơn.
 7) Checklist production nên bật thêm (khuyến nghị)
 Bật alert trên Render khi service down.
-Theo dõi logs để bắt lỗi Gemini/Sheets.
+Theo dõi logs để bắt lỗi Groq/Sheets.
 Xoay vòng API keys định kỳ.
 Cân nhắc thêm rate-limit cho webhook endpoint.
 Lỗi thường gặp (và cách xử lý nhanh)
@@ -58,7 +58,7 @@ Lỗi thường gặp (và cách xử lý nhanh)
 TELEGRAM_WEBHOOK_SECRET trên Render khác với lúc setWebhook.
 500 khi ghi Sheet
 Chưa share Sheet cho service account, sai spreadsheetId, hoặc sai tab name.。
-Gemini parse lỗi
+Groq parse lỗi
 Tin nhắn quá mơ hồ hoặc key sai/hết quota; xem Render logs để biết response cụ thể.
 Các lệnh em đã dùng để soạn runbook này
 nl -ba README.md | sed -n '1,220p'

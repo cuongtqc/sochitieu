@@ -1,7 +1,7 @@
 {
-  "name": "telegram-gemini-sheets-webhook",
+  "name": "telegram-groq-sheets-webhook",
   "version": "1.0.0",
-  "description": "Webhook nhận tin nhắn Telegram, trích xuất dữ liệu chi tiêu bằng Gemini và lưu vào Google Sheets",
+  "description": "Webhook nhận tin nhắn Telegram, trích xuất dữ liệu chi tiêu bằng Groq và lưu vào Google Sheets",
   "type": "module",
   "main": "src/index.js",
   "scripts": {
